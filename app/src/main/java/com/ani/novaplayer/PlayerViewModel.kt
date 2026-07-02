@@ -19,23 +19,21 @@ class PlayerViewModel(private val context: Context) {
 
     var isPlaying by mutableStateOf(false)
         private set
-    var currentTitle by mutableStateOf("")
-        private set
-    var currentArtist by mutableStateOf("")
+    var currentTrack by mutableStateOf<MediaTrack?>(null)
         private set
     var currentPositionMs by mutableStateOf(0L)
     var durationMs by mutableStateOf(0L)
         private set
-    var isVideoPlaying by mutableStateOf(false)
-        private set
+
+    private var queue: List<MediaTrack> = emptyList()
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(playing: Boolean) {
             isPlaying = playing
         }
-        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
-            currentTitle = mediaMetadata.title?.toString() ?: ""
-            currentArtist = mediaMetadata.artist?.toString() ?: ""
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            val id = mediaItem?.mediaId?.toLongOrNull() ?: return
+            queue.find { it.id == id }?.let { currentTrack = it }
         }
     }
 
@@ -50,6 +48,7 @@ class PlayerViewModel(private val context: Context) {
     }
 
     fun playQueue(tracks: List<MediaTrack>, startIndex: Int) {
+        queue = tracks
         val items = tracks.map { track ->
             MediaItem.Builder()
                 .setUri(track.uri)
@@ -62,7 +61,7 @@ class PlayerViewModel(private val context: Context) {
                 )
                 .build()
         }
-        isVideoPlaying = tracks[startIndex].isVideo
+        currentTrack = tracks[startIndex]
         controller?.apply {
             setMediaItems(items, startIndex, 0L)
             prepare()

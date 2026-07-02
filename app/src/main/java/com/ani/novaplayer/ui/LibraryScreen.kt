@@ -31,16 +31,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.ani.novaplayer.MediaScanner
 import com.ani.novaplayer.MediaTrack
 import com.ani.novaplayer.PlayerViewModel
+import com.ani.novaplayer.albumArtUri
 import com.ani.novaplayer.ui.theme.BgDeep
 import com.ani.novaplayer.ui.theme.NeonGreen
 import com.ani.novaplayer.ui.theme.TextSecondary
@@ -55,11 +61,18 @@ fun LibraryScreen(
     var tab by remember { mutableStateOf(0) }
     var audioTracks by remember { mutableStateOf(listOf<MediaTrack>()) }
     var videoTracks by remember { mutableStateOf(listOf<MediaTrack>()) }
+    var isLoading by remember { mutableStateOf(false) }
 
+    // Wichtig fuer Performance: MediaStore-Scan blockt sonst den Main-Thread -> Ruckler beim Start.
     LaunchedEffect(hasPermission) {
         if (hasPermission) {
-            audioTracks = MediaScanner.scanAudio(context)
-            videoTracks = MediaScanner.scanVideo(context)
+            isLoading = true
+            val (audio, video) = withContext(Dispatchers.IO) {
+                MediaScanner.scanAudio(context) to MediaScanner.scanVideo(context)
+            }
+            audioTracks = audio
+            videoTracks = video
+            isLoading = false
         }
     }
 
@@ -85,28 +98,32 @@ fun LibraryScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            if (!hasPermission) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            when {
+                !hasPermission -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("Berechtigung wird benötigt, um Medien zu lesen", color = TextSecondary)
                 }
-            } else {
-                val list = if (tab == 0) audioTracks else videoTracks
-                if (list.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Keine Medien gefunden", color = TextSecondary)
-                    }
-                } else {
-                    LazyColumn(
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(list) { track ->
-                            TrackRow(track) {
-                                viewModel.playQueue(list, list.indexOf(track))
-                                onOpenPlayer()
-                            }
+                isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Lade Medien…", color = TextSecondary)
+                }
+                else -> {
+                    val list = if (tab == 0) audioTracks else videoTracks
+                    if (list.isEmpty()) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Keine Medien gefunden", color = TextSecondary)
                         }
-                        item { Spacer(Modifier.height(90.dp)) }
+                    } else {
+                        LazyColumn(
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            items(list, key = { it.id }) { track ->
+                                TrackRow(track) {
+                                    viewModel.playQueue(list, list.indexOf(track))
+                                    onOpenPlayer()
+                                }
+                            }
+                            item { Spacer(Modifier.height(90.dp)) }
+                        }
                     }
                 }
             }
@@ -162,10 +179,8 @@ private fun TrackRow(track: MediaTrack, onClick: () -> Unit) {
             Box(
                 modifier = Modifier
                     .size(46.dp)
-                    .background(
-                        Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))),
-                        shape = RoundedCornerShape(12.dp)
-                    ),
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF8B5CF6)))),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -173,6 +188,14 @@ private fun TrackRow(track: MediaTrack, onClick: () -> Unit) {
                     contentDescription = null,
                     tint = Color.White
                 )
+                if (!track.isVideo) {
+                    AsyncImage(
+                        model = albumArtUri(track.albumId),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
